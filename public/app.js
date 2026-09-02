@@ -20,7 +20,7 @@ function topBar(title, onBack) {
 function logoRow() {
   return el(`
     <div class="logo-row">
-      <div class="logo-badge">✚</div>
+      <img class="logo-badge" src="/logo.png" alt="Mission Kalima" />
       <div>
         <div class="logo-title">Mission Kalima</div>
         <div class="logo-sub">Jeunesse — Moyenne Guinée</div>
