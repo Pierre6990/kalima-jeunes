@@ -5,6 +5,68 @@ photos et numéros, tableau de bord par église, planification des programmes,
 rappel des anniversaires, et préparation de SMS groupés. Les données sont
 stockées dans Supabase (gratuit, externe), comme pour l'application AEMEG.
 
+## ⚠️ Mise à jour d'un site déjà en ligne
+
+Cette version ajoute : un système de cotisation par église (piloté par le
+responsable régional), des sessions de cotisation exceptionnelle internes à
+chaque église, la possibilité de charger l'affiche d'un événement, et la
+présentation du comité. Ta base contient déjà des jeunes saisis par de
+vraies églises — **avant** de remplacer les fichiers sur GitHub, va
+d'abord dans Supabase → **SQL Editor** → **New query**, colle ceci, puis
+**Run** — ça ajoute les nouvelles tables et la colonne d'affiche sans
+toucher à tes données existantes :
+
+```sql
+alter table programmes add column if not exists photo_url text;
+
+create table if not exists comite (
+  id uuid primary key default gen_random_uuid(),
+  nom text not null,
+  fonction text,
+  telephone text,
+  photo_url text,
+  ordre integer not null default 0,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists objectifs_eglise (
+  eglise text primary key,
+  montant_cible numeric not null default 0
+);
+
+create table if not exists versements_eglise (
+  id uuid primary key default gen_random_uuid(),
+  eglise text not null,
+  montant numeric not null,
+  date_versement date not null default current_date,
+  note text,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists sessions_cotisation (
+  id uuid primary key default gen_random_uuid(),
+  eglise text not null,
+  titre text not null,
+  montant_cible numeric,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists contributions_session (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid references sessions_cotisation(id) on delete cascade,
+  jeune_id uuid references jeunes(id) on delete set null,
+  jeune_nom text,
+  montant numeric not null,
+  date_contribution date not null default current_date,
+  created_at timestamptz not null default now()
+);
+```
+
+Une fois cette migration faite, remplace sur GitHub `server.js` et tout le
+dossier `public/` par les nouvelles versions de ce dossier. Render
+redéploiera automatiquement. Rien à refaire côté églises déjà chargées —
+leurs jeunes restent intacts.
+
 ## Étape 1 — Créer la base Supabase
 
 1. Va sur https://supabase.com → **Start your project** → connecte-toi avec
@@ -31,6 +93,49 @@ stockées dans Supabase (gratuit, externe), comme pour l'application AEMEG.
      date_heure timestamptz not null,
      lieu text,
      description text,
+     photo_url text,
+     created_at timestamptz not null default now()
+   );
+
+   create table comite (
+     id uuid primary key default gen_random_uuid(),
+     nom text not null,
+     fonction text,
+     telephone text,
+     photo_url text,
+     ordre integer not null default 0,
+     created_at timestamptz not null default now()
+   );
+
+   create table objectifs_eglise (
+     eglise text primary key,
+     montant_cible numeric not null default 0
+   );
+
+   create table versements_eglise (
+     id uuid primary key default gen_random_uuid(),
+     eglise text not null,
+     montant numeric not null,
+     date_versement date not null default current_date,
+     note text,
+     created_at timestamptz not null default now()
+   );
+
+   create table sessions_cotisation (
+     id uuid primary key default gen_random_uuid(),
+     eglise text not null,
+     titre text not null,
+     montant_cible numeric,
+     created_at timestamptz not null default now()
+   );
+
+   create table contributions_session (
+     id uuid primary key default gen_random_uuid(),
+     session_id uuid references sessions_cotisation(id) on delete cascade,
+     jeune_id uuid references jeunes(id) on delete set null,
+     jeune_nom text,
+     montant numeric not null,
+     date_contribution date not null default current_date,
      created_at timestamptz not null default now()
    );
    ```
@@ -67,20 +172,33 @@ chaque église de la région.
 
 ## Ce que l'application permet
 
-**Côté responsable d'église** (comme avant) :
+**Côté responsable d'église** (comme avant), avec deux nouveautés :
 - Saisir les jeunes de son église : nom, téléphone, fonction, date de
   naissance, photo
+- Voir en lecture seule la progression de la cotisation régionale de son
+  église, si le responsable régional a fixé un objectif pour elle
+- **Ouvrir ses propres sessions de cotisation exceptionnelle** (ex. "Aide
+  pour le voyage de Fatou") : le responsable régional n'y a aucun accès,
+  c'est un outil entièrement interne à l'église pour suivre une collecte
+  ponctuelle jeune par jeune, avec historique et suppression possibles
 
-**Côté responsable régional**, un menu avec quatre sections :
+**Côté responsable régional**, un menu avec six sections :
 - **Tableau de bord** — nombre d'églises et de jeunes, détail par église
 - **Annuaire complet** — tous les jeunes de la région avec photo et
-  téléphone, recherche par nom/église/fonction, pour identifier rapidement
-  quelqu'un
+  téléphone, recherche par nom/église/fonction
 - **Programmes** — créer des rencontres avec titre, date/heure, lieu,
-  description ; les 2 prochains programmes s'affichent aussi sur l'écran
-  d'accueil, visibles par tous
-- **Anniversaires** — liste des jeunes nés dans le mois sélectionné, pour le
-  suivi pastoral
+  description, et **charger l'affiche de l'événement** (image) qui
+  s'affiche en grand sur l'écran d'accueil ; les 2 prochains programmes
+  restent visibles par tous
+- **Anniversaires** — liste des jeunes nés dans le mois sélectionné
+- **Cotisations** — fixe un objectif par église, note les versements
+  reçus, consulte l'historique. Changer l'objectif d'une église remet son
+  compteur à zéro pour démarrer un nouveau cycle (confirmation demandée
+  avant). L'historique peut aussi être effacé manuellement, versement par
+  versement ou en une fois
+- **Comité** — ajouter les membres (nom, fonction, téléphone, photo) ;
+  affiché sur l'accueil avec le président à gauche et les autres membres
+  à droite
 
 **SMS groupé** : depuis l'annuaire, coche les jeunes concernés (ou "Tout
 sélectionner"), écris ton message, puis "Préparer les groupes" — la liste
@@ -90,6 +208,15 @@ application SMS avec les numéros et le message déjà remplis ; il ne reste
 qu'à appuyer sur envoyer, groupe après groupe. Aucun service payant n'est
 utilisé — tout part directement depuis la puce du téléphone qui ouvre le
 lien.
+
+## Sécurité — bon à savoir
+
+La saisie des jeunes et les sessions de cotisation exceptionnelle restent
+ouvertes comme avant (n'importe qui connaissant le nom d'une église peut y
+accéder — garde ces noms comme un mot de passe informel). Les actions plus
+sensibles au niveau régional (programmes, comité, cotisations par église)
+exigent maintenant le code administrateur à chaque requête, pas seulement à
+l'écran de connexion.
 
 ## Lancer en local (facultatif)
 

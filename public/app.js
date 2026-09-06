@@ -41,6 +41,36 @@ async function api(path, opts) {
   return res.json();
 }
 
+// ---------- Accès admin (PIN partagé) ----------
+function getAdminPin() { return localStorage.getItem("kalima_admin_pin") || ""; }
+function setAdminPin(pin) { localStorage.setItem("kalima_admin_pin", pin); }
+function clearAdminPin() { localStorage.removeItem("kalima_admin_pin"); }
+
+async function apiAdmin(path, opts = {}) {
+  const headers = { "Content-Type": "application/json", "x-admin-pin": getAdminPin() };
+  const res = await fetch(path, { headers, ...opts });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Erreur serveur");
+  }
+  return res.json();
+}
+async function apiAdminUpload(path, formData) {
+  const headers = { "x-admin-pin": getAdminPin() };
+  const res = await fetch(path, { method: "POST", headers, body: formData });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || "Erreur d'envoi");
+  }
+  return res.json();
+}
+function logoutAdminButton() {
+  const btn = el(`<button class="btn btn-ghost btn-sm">Se déconnecter</button>`);
+  btn.onclick = () => { clearAdminPin(); renderHome(); };
+  return btn;
+}
+function formatMontant(n) { return Number(n || 0).toLocaleString("fr-FR") + " GNF"; }
+
 function initials(nom) {
   return (nom || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
@@ -102,16 +132,38 @@ async function renderHome() {
     if (upcoming.length) {
       wrap.appendChild(el(`<p class="section-title">Prochains programmes</p>`));
       upcoming.forEach((p) => {
-        wrap.appendChild(el(`
-          <div class="programme-row">
-            <div class="titre">${escapeHtml(p.titre)}</div>
-            <div class="when">${formatDateTimeFr(p.date_heure)}</div>
-            ${p.lieu ? `<div class="where">📍 ${escapeHtml(p.lieu)}</div>` : ""}
-          </div>
-        `));
+        if (p.photo_url) {
+          wrap.appendChild(el(`
+            <div class="affiche-card">
+              <img src="${p.photo_url}" alt="${escapeHtml(p.titre)}" />
+              <div class="affiche-caption">
+                <div class="titre">${escapeHtml(p.titre)}</div>
+                <div class="when">${formatDateTimeFr(p.date_heure)}</div>
+                ${p.lieu ? `<div class="where">📍 ${escapeHtml(p.lieu)}</div>` : ""}
+              </div>
+            </div>
+          `));
+        } else {
+          wrap.appendChild(el(`
+            <div class="programme-row">
+              <div class="titre">${escapeHtml(p.titre)}</div>
+              <div class="when">${formatDateTimeFr(p.date_heure)}</div>
+              ${p.lieu ? `<div class="where">📍 ${escapeHtml(p.lieu)}</div>` : ""}
+            </div>
+          `));
+        }
       });
     }
   } catch (e) { /* silencieux si erreur réseau */ }
+
+  // Comité, visible à tous
+  try {
+    const { membres } = await api("/api/comite");
+    if (membres.length) {
+      wrap.appendChild(el(`<p class="section-title">Comité</p>`));
+      wrap.appendChild(comiteBar(membres));
+    }
+  } catch (e) { /* silencieux */ }
 }
 
 // ================= ESPACE RESPONSABLE D'ÉGLISE =================
@@ -152,6 +204,12 @@ function renderRoster(nomEglise, jeunes) {
     app.innerHTML = "";
     app.appendChild(topBar(nomEglise, renderPresidentPick));
     const wrap = el(`<div class="container"></div>`);
+
+    wrap.appendChild(el(`<div id="cotisation-eglise-slot"></div>`));
+
+    const sessionsBtn = el(`<button class="btn btn-ghost btn-block" style="margin-bottom:16px;">💰 Sessions de cotisation exceptionnelle</button>`);
+    sessionsBtn.onclick = () => renderSessionsEglise(nomEglise, jeunes);
+    wrap.appendChild(sessionsBtn);
 
     const card = el(`
       <div class="card">
@@ -270,6 +328,20 @@ function renderRoster(nomEglise, jeunes) {
     }
 
     app.appendChild(wrap);
+
+    // Cotisation régionale de l'église (lecture seule) — chargée après affichage
+    api(`/api/eglises/${encodeURIComponent(nomEglise)}/cotisation`).then(({ montantCible, totalVerse }) => {
+      const slot = wrap.querySelector("#cotisation-eglise-slot");
+      if (!slot || montantCible <= 0) return;
+      const pct = Math.min(100, Math.round((totalVerse / montantCible) * 100));
+      slot.appendChild(el(`
+        <div class="region-card">
+          <div class="name">Cotisation régionale de mon église</div>
+          <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+          <div class="progress-label"><span>${formatMontant(totalVerse)} reçus par le responsable régional</span><span>${pct}% de ${formatMontant(montantCible)}</span></div>
+        </div>
+      `));
+    }).catch(() => {});
   }
 
   draw();
@@ -297,8 +369,10 @@ function renderAdminPin() {
 
   async function check() {
     const { ok } = await api("/api/admin/verify", { method: "POST", body: JSON.stringify({ pin: input.value }) });
-    if (ok) renderAdminMenu();
-    else {
+    if (ok) {
+      setAdminPin(input.value);
+      renderAdminMenu();
+    } else {
       errorBox.textContent = "Code incorrect.";
       errorBox.style.display = "block";
     }
@@ -307,7 +381,9 @@ function renderAdminPin() {
 
 function renderAdminMenu() {
   app.innerHTML = "";
-  app.appendChild(topBar("Espace régional", renderHome));
+  const bar = topBar("Espace régional", renderHome);
+  bar.appendChild(logoutAdminButton());
+  app.appendChild(bar);
   const wrap = el(`<div class="container"></div>`);
 
   const grid = el(`<div class="menu-grid"></div>`);
@@ -316,6 +392,8 @@ function renderAdminMenu() {
     { icon: "📇", label: "Annuaire complet", fn: renderAnnuaire },
     { icon: "📅", label: "Programmes", fn: renderProgrammes },
     { icon: "🎂", label: "Anniversaires", fn: renderAnniversaires },
+    { icon: "💰", label: "Cotisations", fn: renderCotisations },
+    { icon: "🤝", label: "Comité", fn: renderComiteAdmin },
   ];
   items.forEach((it) => {
     const tile = el(`<button class="menu-tile"><div class="icon">${it.icon}</div><span class="label">${it.label}</span></button>`);
@@ -564,7 +642,7 @@ async function renderProgrammes() {
       const lieu = fLieu.querySelector("input").value.trim();
       const description = fDesc.querySelector("input").value.trim();
       if (!titre || !date_heure) return;
-      const p = await api("/api/programmes", { method: "POST", body: JSON.stringify({ titre, date_heure: new Date(date_heure).toISOString(), lieu, description }) });
+      const p = await apiAdmin("/api/programmes", { method: "POST", body: JSON.stringify({ titre, date_heure: new Date(date_heure).toISOString(), lieu, description }) });
       programmes.push(p);
       programmes.sort((a, b) => new Date(a.date_heure) - new Date(b.date_heure));
       draw(programmes);
@@ -577,15 +655,29 @@ async function renderProgrammes() {
       programmes.forEach((p) => {
         const row = el(`
           <div class="programme-row">
+            ${p.photo_url ? `<img src="${p.photo_url}" alt="" style="width:100%; border-radius:8px; margin-bottom:10px;" />` : ""}
             <div class="titre">${escapeHtml(p.titre)}</div>
             <div class="when">${formatDateTimeFr(p.date_heure)}</div>
             ${p.lieu ? `<div class="where">📍 ${escapeHtml(p.lieu)}</div>` : ""}
             ${p.description ? `<div class="desc">${escapeHtml(p.description)}</div>` : ""}
-            <button class="del">Supprimer</button>
+            <div style="display:flex; gap:10px; margin-top:8px; align-items:center;">
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer;">📷 ${p.photo_url ? "Remplacer l'affiche" : "Ajouter une affiche"}<input type="file" accept="image/*" style="display:none;" /></label>
+              <button class="del">Supprimer</button>
+            </div>
           </div>
         `);
+        const fileInput = row.querySelector("input[type=file]");
+        fileInput.onchange = async () => {
+          const file = fileInput.files[0];
+          if (!file) return;
+          const fd = new FormData();
+          fd.append("affiche", file);
+          const updated = await apiAdminUpload(`/api/programmes/${p.id}/affiche`, fd);
+          Object.assign(p, updated);
+          draw(programmes);
+        };
         row.querySelector(".del").onclick = async () => {
-          await api(`/api/programmes/${p.id}`, { method: "DELETE" });
+          await apiAdmin(`/api/programmes/${p.id}`, { method: "DELETE" });
           draw(programmes.filter((x) => x.id !== p.id));
         };
         wrap.appendChild(row);
@@ -637,6 +729,367 @@ async function renderAnniversaires() {
     }
   }
   draw();
+}
+
+// ================= COMITÉ (barre pied de page, publique) =================
+function comiteBar(membres) {
+  const idxPresident = membres.findIndex((m) => (m.fonction || "").toLowerCase().includes("président"));
+  const president = idxPresident >= 0 ? membres[idxPresident] : membres[0];
+  const autres = membres.filter((m) => m.id !== president.id);
+
+  const bar = el(`
+    <div class="comite-bar">
+      <div class="president-item">
+        ${avatarHtml(president)}
+        <div>
+          <div class="nom">${escapeHtml(president.nom)}</div>
+          <div class="fonction">${escapeHtml(president.fonction || "Président")}</div>
+          ${president.telephone ? `<div class="tel">${escapeHtml(president.telephone)}</div>` : ""}
+        </div>
+      </div>
+      <div class="others-row"></div>
+    </div>
+  `);
+  const row = bar.querySelector(".others-row");
+  autres.forEach((m) => {
+    row.appendChild(el(`
+      <div class="other-item">
+        ${avatarHtml(m)}
+        <div>
+          <div class="nom">${escapeHtml(m.nom)}</div>
+          ${m.fonction ? `<div class="fonction">${escapeHtml(m.fonction)}</div>` : ""}
+          ${m.telephone ? `<div class="tel">${escapeHtml(m.telephone)}</div>` : ""}
+        </div>
+      </div>
+    `));
+  });
+  return bar;
+}
+
+// ================= COTISATION RÉGIONALE (admin, par église) =================
+async function renderCotisations() {
+  app.innerHTML = "";
+  app.appendChild(topBar("Cotisations", renderAdminMenu));
+  const wrap = el(`<div class="container"><p class="empty">Chargement…</p></div>`);
+  app.appendChild(wrap);
+
+  const { eglises } = await apiAdmin("/api/eglises/resume-cotisations");
+  wrap.innerHTML = "";
+
+  if (eglises.length === 0) {
+    wrap.appendChild(el(`<p class="empty">Aucune église enregistrée pour le moment.</p>`));
+    return;
+  }
+
+  eglises.forEach((e) => {
+    const pct = e.montantCible > 0 ? Math.min(100, Math.round((e.totalVerse / e.montantCible) * 100)) : 0;
+    const card = el(`
+      <div class="region-card">
+        <div class="name">${escapeHtml(e.eglise)}</div>
+        <div class="region-stats"><div class="stat"><b>${e.nbJeunes}</b>jeune${e.nbJeunes > 1 ? "s" : ""}</div></div>
+        <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+        <div class="progress-label"><span>${formatMontant(e.totalVerse)} reçus</span><span>${pct}% de ${formatMontant(e.montantCible)}</span></div>
+        <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;">
+          <button class="btn btn-ghost btn-sm objectif-btn">Modifier l'objectif</button>
+          <button class="btn btn-gold btn-sm versement-btn">＋ Noter un versement</button>
+          <button class="btn btn-ghost btn-sm historique-btn">Historique</button>
+        </div>
+      </div>
+    `);
+    card.querySelector(".objectif-btn").onclick = async () => {
+      const nouveau = prompt(`Nouvel objectif pour ${e.eglise} (en GNF) :`, e.montantCible);
+      if (nouveau === null) return;
+      const confirmation = confirm(`Attention : changer l'objectif de ${e.eglise} remet le montant reçu à zéro et efface l'historique de cette église. Continuer ?`);
+      if (!confirmation) return;
+      try {
+        await apiAdmin(`/api/eglises/${encodeURIComponent(e.eglise)}/objectif`, { method: "PUT", body: JSON.stringify({ montant_cible: nouveau }) });
+        renderCotisations();
+      } catch (err) { alert(err.message); }
+    };
+    card.querySelector(".versement-btn").onclick = () => renderNoterVersement(e.eglise, () => renderCotisations());
+    card.querySelector(".historique-btn").onclick = () => renderHistoriqueVersements(e.eglise);
+    wrap.appendChild(card);
+  });
+}
+
+function renderNoterVersement(eglise, onDone) {
+  app.innerHTML = "";
+  app.appendChild(topBar(`Versement — ${eglise}`, renderCotisations));
+  const wrap = el(`<div class="container"></div>`);
+  wrap.appendChild(el(`<p class="hint-text">Notez ici le montant reçu de cette église.</p>`));
+
+  const fMontant = el(`<label class="field"><span class="label-text">Montant reçu (GNF)</span><input type="number" placeholder="ex. 50000" /></label>`);
+  const fDate = el(`<label class="field"><span class="label-text">Date du versement</span><input type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>`);
+  const fNote = el(`<label class="field"><span class="label-text">Note (facultatif)</span><input placeholder="ex. Remis en main propre" /></label>`);
+  wrap.appendChild(fMontant); wrap.appendChild(fDate); wrap.appendChild(fNote);
+
+  const btn = el(`<button class="btn btn-gold btn-block">Enregistrer le versement</button>`);
+  btn.onclick = async () => {
+    const montant = fMontant.querySelector("input").value;
+    const date_versement = fDate.querySelector("input").value;
+    const note = fNote.querySelector("input").value.trim();
+    if (!montant || Number(montant) <= 0) return;
+    btn.disabled = true;
+    try {
+      await apiAdmin(`/api/eglises/${encodeURIComponent(eglise)}/versements`, { method: "POST", body: JSON.stringify({ montant, date_versement, note }) });
+      onDone();
+    } catch (e) {
+      btn.disabled = false;
+      alert(e.message);
+    }
+  };
+  wrap.appendChild(btn);
+  app.appendChild(wrap);
+}
+
+async function renderHistoriqueVersements(eglise) {
+  app.innerHTML = "";
+  app.appendChild(topBar(`Historique — ${eglise}`, renderCotisations));
+  const wrap = el(`<div class="container"><p class="empty">Chargement…</p></div>`);
+  app.appendChild(wrap);
+  const { versements } = await api(`/api/eglises/${encodeURIComponent(eglise)}/cotisation`);
+
+  function draw() {
+    wrap.innerHTML = "";
+    if (versements.length === 0) {
+      wrap.appendChild(el(`<p class="empty">Aucun versement noté pour cette église.</p>`));
+      return;
+    }
+    const clearBtn = el(`<button class="btn btn-danger-outline btn-sm" style="margin-bottom:14px;">🗑 Vider tout l'historique</button>`);
+    clearBtn.onclick = async () => {
+      if (!confirm(`Effacer tout l'historique de ${eglise} ? Le montant reçu reviendra à zéro.`)) return;
+      await apiAdmin(`/api/eglises/${encodeURIComponent(eglise)}/versements`, { method: "DELETE" });
+      versements.length = 0;
+      draw();
+    };
+    wrap.appendChild(clearBtn);
+
+    versements.forEach((v) => {
+      const row = el(`
+        <div class="jeune-row">
+          <div class="jeune-info"><div>
+            <div class="nom">${formatMontant(v.montant)}</div>
+            <div class="meta">${formatDateFr(v.date_versement)}${v.note ? " · " + escapeHtml(v.note) : ""}</div>
+          </div></div>
+          <button aria-label="Supprimer">🗑</button>
+        </div>
+      `);
+      row.querySelector("button").onclick = async () => {
+        if (!confirm(`Supprimer ce versement de ${formatMontant(v.montant)} ?`)) return;
+        await apiAdmin(`/api/eglises/${encodeURIComponent(eglise)}/versements/${v.id}`, { method: "DELETE" });
+        const idx = versements.findIndex((x) => x.id === v.id);
+        versements.splice(idx, 1);
+        draw();
+      };
+      wrap.appendChild(row);
+    });
+  }
+  draw();
+}
+
+// ================= COMITÉ (admin) =================
+async function renderComiteAdmin() {
+  app.innerHTML = "";
+  app.appendChild(topBar("Comité", renderAdminMenu));
+  const wrap = el(`<div class="container"><p class="empty">Chargement…</p></div>`);
+  app.appendChild(wrap);
+  const { membres } = await api("/api/comite");
+
+  function draw() {
+    wrap.innerHTML = "";
+    wrap.appendChild(el(`<p class="hint-text">Ces membres et leurs coordonnées apparaissent sur la page d'accueil publique.</p>`));
+
+    const card = el(`<div class="card"><div class="card-head"><span class="label">Ajouter un membre</span></div></div>`);
+    const fNom = el(`<label class="field"><span class="label-text">Nom complet</span><input placeholder="Nom et prénom" /></label>`);
+    const fFonction = el(`<label class="field"><span class="label-text">Fonction</span><input placeholder="ex. Responsable régional, Trésorier..." /></label>`);
+    const fTel = el(`<label class="field"><span class="label-text">Téléphone (facultatif)</span><input placeholder="ex. 622 00 00 00" /></label>`);
+    card.appendChild(fNom); card.appendChild(fFonction); card.appendChild(fTel);
+    const addBtn = el(`<button class="btn btn-gold">＋ Ajouter</button>`);
+    card.appendChild(addBtn);
+    addBtn.onclick = async () => {
+      const nom = fNom.querySelector("input").value.trim();
+      const fonction = fFonction.querySelector("input").value.trim();
+      const telephone = fTel.querySelector("input").value.trim();
+      if (!nom) return;
+      addBtn.disabled = true;
+      try {
+        const m = await apiAdmin("/api/comite", { method: "POST", body: JSON.stringify({ nom, fonction, telephone }) });
+        membres.push(m);
+        draw();
+      } catch (e) { addBtn.disabled = false; alert(e.message); }
+    };
+    wrap.appendChild(card);
+
+    wrap.appendChild(el(`<div class="list-head"><span class="label">Membres</span><span class="count">${membres.length}</span></div>`));
+    if (membres.length === 0) {
+      wrap.appendChild(el(`<p class="empty">Aucun membre ajouté pour le moment.</p>`));
+    } else {
+      membres.forEach((m) => {
+        const row = el(`
+          <div class="jeune-row">
+            <div class="jeune-info">
+              ${avatarHtml(m)}
+              <div><div class="nom">${escapeHtml(m.nom)}</div><div class="meta">${escapeHtml(m.fonction || "—")}${m.telephone ? " · " + escapeHtml(m.telephone) : ""}</div></div>
+            </div>
+            <div class="actions">
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer;">📷<input type="file" accept="image/*" style="display:none;" /></label>
+              <button aria-label="Supprimer">🗑</button>
+            </div>
+          </div>
+        `);
+        const fileInput = row.querySelector("input[type=file]");
+        fileInput.onchange = async () => {
+          const file = fileInput.files[0];
+          if (!file) return;
+          const fd = new FormData();
+          fd.append("photo", file);
+          const updated = await apiAdminUpload(`/api/comite/${m.id}/photo`, fd);
+          Object.assign(m, updated);
+          draw();
+        };
+        row.querySelector("button[aria-label=Supprimer]").onclick = async () => {
+          if (!confirm(`Retirer ${m.nom} du comité ?`)) return;
+          await apiAdmin(`/api/comite/${m.id}`, { method: "DELETE" });
+          const idx = membres.findIndex((x) => x.id === m.id);
+          membres.splice(idx, 1);
+          draw();
+        };
+        wrap.appendChild(row);
+      });
+    }
+  }
+  draw();
+}
+
+// ================= SESSIONS DE COTISATION EXCEPTIONNELLE (internes à l'église) =================
+async function renderSessionsEglise(nomEglise, jeunes) {
+  app.innerHTML = "";
+  app.appendChild(topBar("Cotisations exceptionnelles", () => renderRoster(nomEglise, jeunes)));
+  const wrap = el(`<div class="container"><p class="empty">Chargement…</p></div>`);
+  app.appendChild(wrap);
+  const { sessions } = await api(`/api/mon-eglise/${encodeURIComponent(nomEglise)}/sessions`);
+
+  function draw() {
+    wrap.innerHTML = "";
+    wrap.appendChild(el(`<p class="hint-text">Ces sessions sont internes à votre église — le responsable régional n'y a pas accès. Utile pour une collecte ponctuelle (voyage, aide à un jeune, événement...).</p>`));
+
+    const card = el(`<div class="card"><div class="card-head"><span class="label">Nouvelle session</span></div></div>`);
+    const fTitre = el(`<label class="field"><span class="label-text">Titre</span><input placeholder="ex. Aide pour le voyage de Fatou" /></label>`);
+    const fMontant = el(`<label class="field"><span class="label-text">Montant visé (facultatif, en GNF)</span><input type="number" placeholder="ex. 200000" /></label>`);
+    card.appendChild(fTitre); card.appendChild(fMontant);
+    const addBtn = el(`<button class="btn btn-gold">＋ Ouvrir la session</button>`);
+    card.appendChild(addBtn);
+    addBtn.onclick = async () => {
+      const titre = fTitre.querySelector("input").value.trim();
+      const montant_cible = fMontant.querySelector("input").value;
+      if (!titre) return;
+      addBtn.disabled = true;
+      try {
+        const s = await api(`/api/mon-eglise/${encodeURIComponent(nomEglise)}/sessions`, { method: "POST", body: JSON.stringify({ titre, montant_cible: montant_cible || null }) });
+        sessions.unshift(s);
+        draw();
+      } catch (e) { addBtn.disabled = false; alert(e.message); }
+    };
+    wrap.appendChild(card);
+
+    wrap.appendChild(el(`<div class="list-head"><span class="label">Sessions</span><span class="count">${sessions.length}</span></div>`));
+    if (sessions.length === 0) {
+      wrap.appendChild(el(`<p class="empty">Aucune session ouverte pour le moment.</p>`));
+    } else {
+      sessions.forEach((s) => {
+        const row = el(`
+          <button class="eglise-row">
+            <span class="nom">${escapeHtml(s.titre)}</span>
+            <span class="count">${s.montant_cible ? formatMontant(s.montant_cible) + " visés" : ""}</span>
+          </button>
+        `);
+        row.onclick = () => renderSessionDetail(s, nomEglise, jeunes);
+        wrap.appendChild(row);
+      });
+    }
+  }
+  draw();
+}
+
+async function renderSessionDetail(session, nomEglise, jeunes) {
+  app.innerHTML = "";
+  app.appendChild(topBar(session.titre, () => renderSessionsEglise(nomEglise, jeunes)));
+  const wrap = el(`<div class="container"><p class="empty">Chargement…</p></div>`);
+  app.appendChild(wrap);
+  const { contributions, total } = await api(`/api/sessions/${session.id}`);
+
+  function draw(contributions, total) {
+    wrap.innerHTML = "";
+    if (session.montant_cible) {
+      const pct = Math.min(100, Math.round((total / session.montant_cible) * 100));
+      wrap.appendChild(el(`
+        <div class="region-card">
+          <div class="name">Progression</div>
+          <div class="progress-track"><div class="progress-fill" style="width:${pct}%;"></div></div>
+          <div class="progress-label"><span>${formatMontant(total)} collectés</span><span>${pct}% de ${formatMontant(session.montant_cible)}</span></div>
+        </div>
+      `));
+    } else {
+      wrap.appendChild(el(`<p class="hint-text">Total collecté : <b>${formatMontant(total)}</b></p>`));
+    }
+
+    const card = el(`<div class="card"><div class="card-head"><span class="label">Ajouter une contribution</span></div></div>`);
+    const fJeune = el(`<label class="field"><span class="label-text">Jeune</span><select></select></label>`);
+    const select = fJeune.querySelector("select");
+    select.appendChild(el(`<option value="">— Choisir —</option>`));
+    jeunes.forEach((j) => select.appendChild(el(`<option value="${j.id}">${escapeHtml(j.nom)}</option>`)));
+    const fMontant = el(`<label class="field"><span class="label-text">Montant (GNF)</span><input type="number" placeholder="ex. 10000" /></label>`);
+    const fDate = el(`<label class="field"><span class="label-text">Date</span><input type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>`);
+    card.appendChild(fJeune); card.appendChild(fMontant); card.appendChild(fDate);
+    const addBtn = el(`<button class="btn btn-gold">＋ Ajouter</button>`);
+    card.appendChild(addBtn);
+    addBtn.onclick = async () => {
+      const jeune_id = select.value;
+      const jeune_nom = select.options[select.selectedIndex].text;
+      const montant = fMontant.querySelector("input").value;
+      const date_contribution = fDate.querySelector("input").value;
+      if (!jeune_id || !montant || Number(montant) <= 0) return;
+      addBtn.disabled = true;
+      try {
+        await api(`/api/sessions/${session.id}/contributions`, { method: "POST", body: JSON.stringify({ jeune_id, jeune_nom, montant, date_contribution }) });
+        const updated = await api(`/api/sessions/${session.id}`);
+        draw(updated.contributions, updated.total);
+      } catch (e) { addBtn.disabled = false; alert(e.message); }
+    };
+    wrap.appendChild(card);
+
+    wrap.appendChild(el(`<div class="list-head"><span class="label">Contributions</span><span class="count">${contributions.length}</span></div>`));
+    if (contributions.length === 0) {
+      wrap.appendChild(el(`<p class="empty">Aucune contribution notée pour le moment.</p>`));
+    } else {
+      contributions.forEach((c) => {
+        const row = el(`
+          <div class="jeune-row">
+            <div class="jeune-info"><div>
+              <div class="nom">${escapeHtml(c.jeune_nom)}</div>
+              <div class="meta">${formatMontant(c.montant)} · ${formatDateFr(c.date_contribution)}</div>
+            </div></div>
+            <button aria-label="Supprimer">🗑</button>
+          </div>
+        `);
+        row.querySelector("button").onclick = async () => {
+          await api(`/api/sessions/${session.id}/contributions/${c.id}`, { method: "DELETE" });
+          const updated = await api(`/api/sessions/${session.id}`);
+          draw(updated.contributions, updated.total);
+        };
+        wrap.appendChild(row);
+      });
+    }
+
+    const closeBtn = el(`<button class="btn btn-danger-outline" style="margin-top:20px;">🗑 Fermer et supprimer cette session</button>`);
+    closeBtn.onclick = async () => {
+      if (!confirm(`Supprimer définitivement la session "${session.titre}" et toutes ses contributions ?`)) return;
+      await api(`/api/sessions/${session.id}`, { method: "DELETE" });
+      renderSessionsEglise(nomEglise, jeunes);
+    };
+    wrap.appendChild(closeBtn);
+  }
+  draw(contributions, total);
 }
 
 renderHome();

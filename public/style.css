@@ -45,7 +45,7 @@ body {
   display: flex;
 }
 .topbar button:hover { background: rgba(0,0,0,.05); }
-.topbar span { font-weight: 600; color: var(--ink); }
+.topbar span { font-weight: 600; color: var(--ink); flex: 1; }
 
 .logo-row {
   display: flex;
@@ -233,3 +233,41 @@ label.field input:focus { box-shadow: 0 0 0 2px var(--gold); }
 }
 
 .section-title { font-size: 14px; font-weight: 600; color: var(--ink); margin: 20px 0 10px; }
+
+/* ---- Barre de progression cotisation ---- */
+.region-card { border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 18px; margin-bottom: 14px; }
+.region-card .name { font-weight: 700; font-size: 16px; color: var(--ink); margin-bottom: 10px; font-family: Georgia, serif; }
+.region-stats { display: flex; gap: 18px; margin-bottom: 14px; }
+.region-stats .stat { font-size: 13px; color: var(--muted); }
+.region-stats .stat b { display: block; font-size: 20px; color: var(--ink); font-family: Georgia, serif; }
+.progress-track { height: 10px; background: var(--paper); border-radius: 6px; overflow: hidden; margin-bottom: 6px; border: 1px solid var(--line); }
+.progress-fill { height: 100%; background: linear-gradient(90deg, var(--gold), #D9A94A); border-radius: 6px; }
+.progress-label { font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; }
+.btn-block { display: flex; width: 100%; justify-content: center; }
+.btn-sm { padding: 7px 12px; font-size: 13px; border-radius: 6px; }
+
+/* ---- Barre comité (pied de page accueil) ---- */
+.comite-bar {
+  background: var(--ink); border-radius: 14px; padding: 14px 16px; margin-bottom: 8px;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  flex-wrap: wrap;
+}
+.comite-bar .president-item { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.comite-bar .president-item .avatar { width: 46px; height: 46px; border: 2px solid var(--gold); }
+.comite-bar .president-item .nom { color: #fff; font-weight: 700; font-size: 13.5px; }
+.comite-bar .president-item .fonction { color: var(--gold); font-size: 11.5px; }
+.comite-bar .president-item .tel { color: #C9D4E0; font-size: 11px; }
+.comite-bar .others-row { display: flex; gap: 14px; overflow-x: auto; align-items: center; }
+.comite-bar .other-item { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.comite-bar .other-item .avatar { width: 38px; height: 38px; border: 1.5px solid rgba(255,255,255,.4); }
+.comite-bar .other-item .nom { font-size: 12.5px; color: #fff; font-weight: 600; line-height: 1.2; }
+.comite-bar .other-item .fonction { font-size: 10.5px; color: var(--gold); line-height: 1.2; }
+.comite-bar .other-item .tel { font-size: 10px; color: #C9D4E0; line-height: 1.2; }
+
+/* ---- Affiche d'événement (accueil) ---- */
+.affiche-card { border-radius: 12px; overflow: hidden; margin-bottom: 14px; border: 1px solid var(--line); background: #fff; }
+.affiche-card img { width: 100%; display: block; }
+.affiche-card .affiche-caption { padding: 12px 14px; }
+.affiche-card .affiche-caption .titre { font-weight: 700; font-size: 15px; color: var(--ink); margin-bottom: 4px; font-family: Georgia, serif; }
+.affiche-card .affiche-caption .when { font-size: 14px; color: var(--gold); font-weight: 500; margin-bottom: 2px; }
+.affiche-card .affiche-caption .where { font-size: 14px; color: var(--muted); }
