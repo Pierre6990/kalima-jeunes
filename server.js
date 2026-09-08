@@ -2,6 +2,7 @@ const express = require("express");
 const path = require("path");
 const { createClient } = require("@supabase/supabase-js");
 const multer = require("multer");
+const PDFDocument = require("pdfkit");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -184,6 +185,84 @@ app.delete("/api/programmes/:id", requireAdmin, async (req, res) => {
   const { error } = await supabase.from("programmes").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
+});
+
+// ================= INSCRIPTIONS AUX PROGRAMMES =================
+app.post("/api/programmes/:id/inscriptions", async (req, res) => {
+  const { nom, telephone, eglise } = req.body || {};
+  if (!nom || !nom.trim()) return res.status(400).json({ error: "Nom requis" });
+  const { data, error } = await supabase
+    .from("inscriptions_programme")
+    .insert({ programme_id: req.params.id, nom: nom.trim(), telephone, eglise })
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.get("/api/programmes/:id/inscriptions", requireAdmin, async (req, res) => {
+  const { data, error } = await supabase
+    .from("inscriptions_programme")
+    .select("*")
+    .eq("programme_id", req.params.id)
+    .order("created_at", { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ inscriptions: data });
+});
+
+app.get("/api/programmes/:id/inscriptions/pdf", requireAdmin, async (req, res) => {
+  const { data: programme } = await supabase.from("programmes").select("titre").eq("id", req.params.id).single();
+  const { data: inscriptions, error } = await supabase
+    .from("inscriptions_programme")
+    .select("*")
+    .eq("programme_id", req.params.id)
+    .order("nom", { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+
+  const titre = programme ? programme.titre : "Programme";
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="inscrits-${titre.replace(/[^a-z0-9]+/gi, "_")}.pdf"`);
+
+  const doc = new PDFDocument({ margin: 50, size: "A4" });
+  doc.pipe(res);
+
+  doc.fontSize(18).fillColor("#1F3A5F").text("Mission Kalima — Moyenne Guinée", { align: "center" });
+  doc.moveDown(0.3);
+  doc.fontSize(14).fillColor("#22262B").text(`Liste des inscrits — ${titre}`, { align: "center" });
+  doc.moveDown(0.2);
+  doc.fontSize(10).fillColor("#8A8266").text(`${inscriptions.length} inscrit${inscriptions.length > 1 ? "s" : ""} · Édité le ${new Date().toLocaleDateString("fr-FR")}`, { align: "center" });
+  doc.moveDown(1.2);
+
+  const colX = { nom: 50, tel: 250, eglise: 400 };
+  function drawHeader(y) {
+    doc.rect(50, y, 495, 22).fill("#1F3A5F");
+    doc.fillColor("#fff").fontSize(10);
+    doc.text("Nom", colX.nom + 5, y + 6, { width: 190 });
+    doc.text("Téléphone", colX.tel + 5, y + 6, { width: 140 });
+    doc.text("Église", colX.eglise + 5, y + 6, { width: 140 });
+    return y + 22;
+  }
+
+  let y = drawHeader(doc.y);
+  doc.fontSize(9);
+  inscriptions.forEach((i, idx) => {
+    if (y > 760) {
+      doc.addPage();
+      y = drawHeader(50);
+    }
+    if (idx % 2 === 0) doc.rect(50, y, 495, 20).fill("#F3EFE3");
+    doc.fillColor("#22262B");
+    doc.text(i.nom || "", colX.nom + 5, y + 5, { width: 190 });
+    doc.text(i.telephone || "—", colX.tel + 5, y + 5, { width: 140 });
+    doc.text(i.eglise || "—", colX.eglise + 5, y + 5, { width: 140 });
+    y += 20;
+  });
+
+  if (inscriptions.length === 0) {
+    doc.fillColor("#8A8266").text("Aucune inscription reçue pour ce programme.", 50, y + 10);
+  }
+
+  doc.end();
 });
 
 // ================= COMMUNIQUÉS =================

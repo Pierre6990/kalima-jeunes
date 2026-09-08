@@ -142,8 +142,9 @@ async function renderHome() {
     if (upcoming.length) {
       wrap.appendChild(el(`<p class="section-title">Prochains programmes</p>`));
       upcoming.forEach((p) => {
+        let card;
         if (p.photo_url) {
-          wrap.appendChild(el(`
+          card = el(`
             <div class="affiche-card">
               <img src="${p.photo_url}" alt="${escapeHtml(p.titre)}" />
               <div class="affiche-caption">
@@ -152,16 +153,20 @@ async function renderHome() {
                 ${p.lieu ? `<div class="where">📍 ${escapeHtml(p.lieu)}</div>` : ""}
               </div>
             </div>
-          `));
+          `);
         } else {
-          wrap.appendChild(el(`
+          card = el(`
             <div class="programme-row">
               <div class="titre">${escapeHtml(p.titre)}</div>
               <div class="when">${formatDateTimeFr(p.date_heure)}</div>
               ${p.lieu ? `<div class="where">📍 ${escapeHtml(p.lieu)}</div>` : ""}
             </div>
-          `));
+          `);
         }
+        const inscrireBtn = el(`<button class="btn btn-gold btn-sm" style="margin:8px 0 16px;">✋ S'inscrire</button>`);
+        inscrireBtn.onclick = () => renderProgrammeInscriptionForm(p);
+        wrap.appendChild(card);
+        wrap.appendChild(inscrireBtn);
       });
     }
   } catch (e) { /* silencieux si erreur réseau */ }
@@ -671,12 +676,14 @@ async function renderProgrammes() {
             <div class="when">${formatDateTimeFr(p.date_heure)}</div>
             ${p.lieu ? `<div class="where">📍 ${escapeHtml(p.lieu)}</div>` : ""}
             ${p.description ? `<div class="desc">${escapeHtml(p.description)}</div>` : ""}
-            <div style="display:flex; gap:10px; margin-top:8px; align-items:center;">
+            <div style="display:flex; gap:10px; margin-top:8px; align-items:center; flex-wrap:wrap;">
               <label class="btn btn-ghost btn-sm" style="cursor:pointer;">📷 ${p.photo_url ? "Remplacer l'affiche" : "Ajouter une affiche"}<input type="file" accept="image/*" style="display:none;" /></label>
+              <button class="voir-inscrits btn btn-ghost btn-sm">✋ Voir les inscrits</button>
               <button class="del">Supprimer</button>
             </div>
           </div>
         `);
+        row.querySelector(".voir-inscrits").onclick = () => renderInscriptionsProgramme(p);
         const fileInput = row.querySelector("input[type=file]");
         fileInput.onchange = async () => {
           const file = fileInput.files[0];
@@ -1182,6 +1189,87 @@ async function renderSessionDetail(session, nomEglise, jeunes) {
     wrap.appendChild(closeBtn);
   }
   draw(contributions, total);
+}
+
+// ================= INSCRIPTIONS AUX PROGRAMMES =================
+function renderProgrammeInscriptionForm(programme) {
+  app.innerHTML = "";
+  app.appendChild(topBar("S'inscrire", renderHome));
+  const wrap = el(`<div class="container"></div>`);
+  wrap.appendChild(el(`<p class="lead"><b>${escapeHtml(programme.titre)}</b><br>${formatDateTimeFr(programme.date_heure)}${programme.lieu ? " · " + escapeHtml(programme.lieu) : ""}</p>`));
+
+  const fNom = el(`<label class="field"><span class="label-text">Nom complet</span><input placeholder="Votre nom" /></label>`);
+  const fTel = el(`<label class="field"><span class="label-text">Téléphone</span><input placeholder="Votre numéro" /></label>`);
+  const fEglise = el(`<label class="field"><span class="label-text">Église</span><input placeholder="Nom de votre église" /></label>`);
+  wrap.appendChild(fNom); wrap.appendChild(fTel); wrap.appendChild(fEglise);
+
+  const confirmBox = el(`<p class="saved-flag" style="display:none;">✓ Inscription enregistrée, merci !</p>`);
+  const btn = el(`<button class="btn btn-gold btn-block">M'inscrire</button>`);
+  btn.onclick = async () => {
+    const nom = fNom.querySelector("input").value.trim();
+    if (!nom) return;
+    btn.disabled = true;
+    try {
+      await api(`/api/programmes/${programme.id}/inscriptions`, {
+        method: "POST",
+        body: JSON.stringify({
+          nom,
+          telephone: fTel.querySelector("input").value.trim(),
+          eglise: fEglise.querySelector("input").value.trim(),
+        }),
+      });
+      confirmBox.style.display = "block";
+      btn.style.display = "none";
+    } catch (e) {
+      btn.disabled = false;
+      alert(e.message);
+    }
+  };
+  wrap.appendChild(btn);
+  wrap.appendChild(confirmBox);
+  app.appendChild(wrap);
+}
+
+async function renderInscriptionsProgramme(programme) {
+  app.innerHTML = "";
+  app.appendChild(topBar(`Inscrits — ${programme.titre}`, renderProgrammes));
+  const wrap = el(`<div class="container"><p class="empty">Chargement…</p></div>`);
+  app.appendChild(wrap);
+
+  const { inscriptions } = await apiAdmin(`/api/programmes/${programme.id}/inscriptions`);
+  wrap.innerHTML = "";
+  wrap.appendChild(el(`<p class="hint-text">${inscriptions.length} inscrit${inscriptions.length > 1 ? "s" : ""}</p>`));
+
+  const pdfBtn = el(`<button class="btn btn-gold btn-block" style="margin-bottom:16px;">📄 Télécharger en PDF</button>`);
+  pdfBtn.onclick = async () => {
+    pdfBtn.disabled = true;
+    try {
+      const res = await fetch(`/api/programmes/${programme.id}/inscriptions/pdf`, {
+        headers: { "x-admin-pin": getAdminPin() },
+      });
+      if (!res.ok) throw new Error("Erreur lors de la génération du PDF");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `inscrits-${programme.titre.replace(/\s+/g, "_")}.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(e.message);
+    }
+    pdfBtn.disabled = false;
+  };
+  wrap.appendChild(pdfBtn);
+
+  if (inscriptions.length === 0) {
+    wrap.appendChild(el(`<p class="empty">Aucune inscription reçue pour ce programme.</p>`));
+  } else {
+    inscriptions.forEach((i) => {
+      wrap.appendChild(el(`
+        <div class="jeune-row"><div class="jeune-info"><div><div class="nom">${escapeHtml(i.nom)}</div><div class="meta">${escapeHtml(i.telephone || "—")} · ${escapeHtml(i.eglise || "—")}</div></div></div></div>
+      `));
+    });
+  }
 }
 
 renderHome();

@@ -19,6 +19,15 @@ toucher à tes données existantes :
 ```sql
 alter table programmes add column if not exists photo_url text;
 
+create table if not exists inscriptions_programme (
+  id uuid primary key default gen_random_uuid(),
+  programme_id uuid references programmes(id) on delete cascade,
+  nom text not null,
+  telephone text,
+  eglise text,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists communiques (
   id uuid primary key default gen_random_uuid(),
   titre text not null,
@@ -102,6 +111,15 @@ leurs jeunes restent intacts.
      lieu text,
      description text,
      photo_url text,
+     created_at timestamptz not null default now()
+   );
+
+   create table inscriptions_programme (
+     id uuid primary key default gen_random_uuid(),
+     programme_id uuid references programmes(id) on delete cascade,
+     nom text not null,
+     telephone text,
+     eglise text,
      created_at timestamptz not null default now()
    );
 
@@ -205,7 +223,11 @@ chaque église de la région.
 - **Programmes** — créer des rencontres avec titre, date/heure, lieu,
   description, et **charger l'affiche de l'événement** (image) qui
   s'affiche en grand sur l'écran d'accueil ; les 2 prochains programmes
-  restent visibles par tous
+  restent visibles par tous, avec un bouton **"S'inscrire"** que
+  n'importe qui peut utiliser sans se connecter (nom, téléphone,
+  église). Depuis l'écran Programmes, le bouton **"Voir les inscrits"**
+  affiche la liste et permet de la **télécharger en PDF**, prête à
+  imprimer
 - **Communiqués** — publier des annonces (titre + texte), avec
   possibilité d'y **charger une affiche** aussi. Présentés sur l'accueil
   avec un bandeau doré, comme sur les sites AEMEG et Kalima national.
