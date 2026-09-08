@@ -83,6 +83,7 @@ function escapeHtml(str) {
   d.textContent = str || "";
   return d.innerHTML;
 }
+function escapeHtmlMultiline(str) { return escapeHtml(str).replace(/\n/g, "<br>"); }
 function normalizePhone(p) {
   return (p || "").replace(/[^\d+]/g, "");
 }
@@ -124,6 +125,15 @@ async function renderHome() {
   wrap.appendChild(cardPresident);
   wrap.appendChild(cardAdmin);
   app.appendChild(wrap);
+
+  // Communiqués, visibles à tous
+  try {
+    const { communiques } = await api("/api/communiques");
+    if (communiques.length) {
+      wrap.appendChild(el(`<p class="section-title">📢 Communiqués</p>`));
+      communiques.slice(0, 5).forEach((c) => wrap.appendChild(communiquePoster(c)));
+    }
+  } catch (e) { /* silencieux */ }
 
   // Aperçu des prochains programmes, visible à tous
   try {
@@ -393,6 +403,7 @@ function renderAdminMenu() {
     { icon: "📅", label: "Programmes", fn: renderProgrammes },
     { icon: "🎂", label: "Anniversaires", fn: renderAnniversaires },
     { icon: "💰", label: "Cotisations", fn: renderCotisations },
+    { icon: "📢", label: "Communiqués", fn: renderCommuniquesAdmin },
     { icon: "🤝", label: "Comité", fn: renderComiteAdmin },
   ];
   items.forEach((it) => {
@@ -732,6 +743,23 @@ async function renderAnniversaires() {
 }
 
 // ================= COMITÉ (barre pied de page, publique) =================
+// ================= COMMUNIQUÉS (affiche, publique) =================
+function communiquePoster(c) {
+  return el(`
+    <div class="poster-communique">
+      ${c.photo_url ? `<img src="${c.photo_url}" alt="${escapeHtml(c.titre)}" class="poster-comm-img" />` : ""}
+      <div class="poster-comm-head">
+        <span class="poster-comm-tag">Communiqué</span>
+        <span class="poster-comm-date">${formatDateFr(c.created_at.slice(0, 10))}</span>
+      </div>
+      <div class="poster-comm-body">
+        <div class="poster-comm-titre">${escapeHtml(c.titre)}</div>
+        <div class="poster-comm-contenu">${escapeHtmlMultiline(c.contenu)}</div>
+      </div>
+    </div>
+  `);
+}
+
 function comiteBar(membres) {
   const idxPresident = membres.findIndex((m) => (m.fonction || "").toLowerCase().includes("président"));
   const president = idxPresident >= 0 ? membres[idxPresident] : membres[0];
@@ -955,6 +983,70 @@ async function renderComiteAdmin() {
           draw();
         };
         wrap.appendChild(row);
+      });
+    }
+  }
+  draw();
+}
+
+// ================= COMMUNIQUÉS (admin) =================
+async function renderCommuniquesAdmin() {
+  app.innerHTML = "";
+  app.appendChild(topBar("Communiqués", renderAdminMenu));
+  const wrap = el(`<div class="container"><p class="empty">Chargement…</p></div>`);
+  app.appendChild(wrap);
+  const { communiques } = await api("/api/communiques");
+
+  function draw() {
+    wrap.innerHTML = "";
+    const card = el(`<div class="card"><div class="card-head"><span class="label">Nouveau communiqué</span></div></div>`);
+    const fTitre = el(`<label class="field"><span class="label-text">Titre</span><input placeholder="ex. Réunion des responsables d'église" /></label>`);
+    const fContenu = el(`<label class="field"><span class="label-text">Contenu</span><textarea rows="4" style="width:100%; border:1px solid var(--line); border-radius:6px; padding:10px 12px; font-size:15px; font-family:inherit;"></textarea></label>`);
+    card.appendChild(fTitre); card.appendChild(fContenu);
+    const btn = el(`<button class="btn btn-gold">Publier</button>`);
+    card.appendChild(btn);
+    btn.onclick = async () => {
+      const titre = fTitre.querySelector("input").value.trim();
+      const contenu = fContenu.querySelector("textarea").value.trim();
+      if (!titre || !contenu) return;
+      btn.disabled = true;
+      try {
+        const c = await apiAdmin("/api/communiques", { method: "POST", body: JSON.stringify({ titre, contenu }) });
+        communiques.unshift(c);
+        draw();
+      } catch (e) { btn.disabled = false; alert(e.message); }
+    };
+    wrap.appendChild(card);
+
+    wrap.appendChild(el(`<div class="list-head"><span class="label">Publiés</span></div>`));
+    if (communiques.length === 0) {
+      wrap.appendChild(el(`<p class="empty">Aucun communiqué publié.</p>`));
+    } else {
+      communiques.forEach((c) => {
+        const card2 = communiquePoster(c);
+        const actionsRow = el(`<div style="display:flex; gap:8px; margin:8px 0 16px; flex-wrap:wrap;"></div>`);
+        const afficheLabel = el(`<label class="btn btn-ghost btn-sm" style="cursor:pointer;">📷 ${c.photo_url ? "Changer l'affiche" : "Ajouter une affiche"}<input type="file" accept="image/*" style="display:none;" /></label>`);
+        const fileInput = afficheLabel.querySelector("input");
+        fileInput.onchange = async () => {
+          const file = fileInput.files[0];
+          if (!file) return;
+          const fd = new FormData();
+          fd.append("affiche", file);
+          const updated = await apiAdminUpload(`/api/communiques/${c.id}/affiche`, fd);
+          Object.assign(c, updated);
+          draw();
+        };
+        const delBtn = el(`<button class="btn btn-danger-outline btn-sm">Supprimer</button>`);
+        delBtn.onclick = async () => {
+          await apiAdmin(`/api/communiques/${c.id}`, { method: "DELETE" });
+          const idx = communiques.findIndex((x) => x.id === c.id);
+          communiques.splice(idx, 1);
+          draw();
+        };
+        actionsRow.appendChild(afficheLabel);
+        actionsRow.appendChild(delBtn);
+        wrap.appendChild(card2);
+        wrap.appendChild(actionsRow);
       });
     }
   }

@@ -186,6 +186,46 @@ app.delete("/api/programmes/:id", requireAdmin, async (req, res) => {
   res.json({ ok: true });
 });
 
+// ================= COMMUNIQUÉS =================
+app.get("/api/communiques", async (req, res) => {
+  const { data, error } = await supabase.from("communiques").select("*").order("created_at", { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ communiques: data });
+});
+
+app.post("/api/communiques", requireAdmin, async (req, res) => {
+  const { titre, contenu } = req.body || {};
+  if (!titre || !contenu) return res.status(400).json({ error: "Titre et contenu requis" });
+  const { data, error } = await supabase
+    .from("communiques")
+    .insert({ titre: titre.trim(), contenu: contenu.trim() })
+    .select()
+    .single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post("/api/communiques/:id/affiche", requireAdmin, upload.single("affiche"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "Aucune image reçue" });
+  const ext = (req.file.mimetype.split("/")[1] || "jpg").replace("jpeg", "jpg");
+  const filePath = `affiche-communique-${req.params.id}.${ext}`;
+  const { error: uploadError } = await supabase.storage
+    .from(PHOTOS_BUCKET)
+    .upload(filePath, req.file.buffer, { contentType: req.file.mimetype, upsert: true });
+  if (uploadError) return res.status(500).json({ error: uploadError.message });
+  const { data: pub } = supabase.storage.from(PHOTOS_BUCKET).getPublicUrl(filePath);
+  const photo_url = `${pub.publicUrl}?t=${Date.now()}`;
+  const { data, error } = await supabase.from("communiques").update({ photo_url }).eq("id", req.params.id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.delete("/api/communiques/:id", requireAdmin, async (req, res) => {
+  const { error } = await supabase.from("communiques").delete().eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
 // ================= COMITÉ =================
 app.get("/api/comite", async (req, res) => {
   const { data, error } = await supabase.from("comite").select("*").order("ordre", { ascending: true });

@@ -19,6 +19,14 @@ toucher à tes données existantes :
 ```sql
 alter table programmes add column if not exists photo_url text;
 
+create table if not exists communiques (
+  id uuid primary key default gen_random_uuid(),
+  titre text not null,
+  contenu text not null,
+  photo_url text,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists comite (
   id uuid primary key default gen_random_uuid(),
   nom text not null,
@@ -93,6 +101,14 @@ leurs jeunes restent intacts.
      date_heure timestamptz not null,
      lieu text,
      description text,
+     photo_url text,
+     created_at timestamptz not null default now()
+   );
+
+   create table communiques (
+     id uuid primary key default gen_random_uuid(),
+     titre text not null,
+     contenu text not null,
      photo_url text,
      created_at timestamptz not null default now()
    );
@@ -190,6 +206,12 @@ chaque église de la région.
   description, et **charger l'affiche de l'événement** (image) qui
   s'affiche en grand sur l'écran d'accueil ; les 2 prochains programmes
   restent visibles par tous
+- **Communiqués** — publier des annonces (titre + texte), avec
+  possibilité d'y **charger une affiche** aussi. Présentés sur l'accueil
+  avec un bandeau doré, comme sur les sites AEMEG et Kalima national.
+  Différence avec Programmes : un communiqué est une annonce ou une
+  information à faire passer, sans date de rencontre associée ; un
+  programme est une rencontre planifiée avec une date et un lieu précis
 - **Anniversaires** — liste des jeunes nés dans le mois sélectionné
 - **Cotisations** — fixe un objectif par église, note les versements
   reçus, consulte l'historique. Changer l'objectif d'une église remet son
