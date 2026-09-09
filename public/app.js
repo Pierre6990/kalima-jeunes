@@ -249,7 +249,7 @@ function renderRoster(nomEglise, jeunes) {
     const fPhoto = el(`
       <label class="field">
         <span class="label-text">Photo (facultatif)</span>
-        <input type="file" accept="image/*" capture="environment" />
+        <input type="file" accept="image/*" />
       </label>
     `);
     const photoInput = fPhoto.querySelector("input");
